@@ -202,6 +202,19 @@ def is_botcheck_error(err_text: str) -> bool:
     return "sign in to confirm" in low or "not a bot" in low
 
 
+def is_proxy_failure(err_text: str) -> bool:
+    """True when the failure is the transport/proxy itself (dead proxy,
+    connect timeout, 502/503/504), not YouTube rejecting the request."""
+    low = (err_text or "").lower()
+    return any(s in low for s in (
+        "failed to connect", "could not connect", "connection",
+        "timed out", "timeout", "transporterror", "timedout",
+        "http error 502", "http error 503", "http error 504",
+        "curl:", "empty reply", "network is unreachable",
+        "name resolution", "proxy error", "bad gateway",
+        "service unavailable", "gateway timeout"))
+
+
 # Fallback chains when the primary attempt hits the bot-check wall.
 # WEB FIRST: the web client accepts the PO token and returns a player
 # response; tv gets bot-checked even with a token. Embedded clients
@@ -232,7 +245,8 @@ def extract_info(url: str) -> dict:
         ]
         if not is_proxy:
             strategies.append({"clients": _RETRY_EXOTIC, "use_pot": False, "proxy": None})
-        for extra in strategies:
+        for s_idx, extra in enumerate(strategies):
+            is_last_strat = s_idx == len(strategies) - 1
             try:
                 with YoutubeDL({**_base_opts(**extra), "skip_download": True}) as ydl:
                     info = ydl.extract_info(url, download=False)
@@ -252,8 +266,14 @@ def extract_info(url: str) -> dict:
                 raise
             except DownloadError as e:
                 last_err = str(e)
-                if not is_botcheck_error(last_err):
-                    raise
+                if not is_botcheck_error(last_err) and not is_proxy_failure(last_err):
+                    raise  # real error (video gone, bad URL) — not proxy/bot
+                if proxy is not None and is_proxy_failure(last_err):
+                    # Dead proxy: don't waste the other strategies on it.
+                    log_retry(url, extra, proxy)
+                    break
+                if is_last_strat and proxy is not None:
+                    break  # this proxy exhausted its strategies → next proxy
                 log_retry(url, extra, proxy)
                 # Brief pause: hammering the same IP with instant retries
                 # trips the rate limiter harder. A short gap lets a
@@ -433,12 +453,16 @@ def download(
                 raise
             except DownloadError as e:
                 last_err = e
-                if not is_botcheck_error(str(e)):
-                    raise
+                msg = str(e)
+                if not is_botcheck_error(msg) and not is_proxy_failure(msg):
+                    raise  # real error — not proxy/bot related
+                if proxy is not None and is_proxy_failure(msg):
+                    log_retry(url, extra, proxy)
+                    break  # dead proxy → next proxy
                 if is_last:
                     if proxy is None:
                         raise  # direct was the last candidate: nothing left
-                    break  # try the next proxy
+                    break  # this proxy exhausted its strategies → next proxy
                 log_retry(url, extra, proxy)
                 time.sleep(2)
                 continue
