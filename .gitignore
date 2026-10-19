@@ -1,0 +1,23 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+
+# Bot runtime
+downloads/*
+!downloads/.gitkeep
+zyrox.db
+*.session
+.env
+
+# Secrets / cookies (never commit)
+cookies.txt
+*.cookies
+
+# OS / editor junk
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
