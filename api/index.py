@@ -144,6 +144,28 @@ async def health(request: Request):
             res = {"ok": False, "error": f"trace timeout/crash: {e}"[:300]}
         res["pot_log"] = lines[-40:]
         res["pot_url"] = config.POT_SERVER_URL
+        # Direct self-call to the POT server with the exact payload the
+        # plugin sends: proves whether get_pot works from inside Vercel
+        # (vs. only when called from outside).
+        try:
+            import json as _json
+            import urllib.request as _urlreq
+            payload = _json.dumps({
+                "bypass_cache": False, "challenge": None,
+                "content_binding": url.split("v=")[-1].split("&")[0].split("/")[-1].split("?")[0] or "PEylwLDmayE",
+                "disable_tls_verification": True, "proxy": None,
+                "innertube_context": {"client": {"clientName": "WEB", "clientVersion": "2.20260708.00.00",
+                                                 "hl": "en", "timeZone": "UTC", "utcOffsetMinutes": 0}},
+                "source_address": None}).encode()
+            req = _urlreq.Request(config.POT_SERVER_URL + "/get_pot", data=payload,
+                                  headers={"Content-Type": "application/json"})
+            with _urlreq.urlopen(req, timeout=60) as r:
+                body = _json.loads(r.read().decode())
+                res["pot_selfcall"] = {"http": r.status,
+                                       "token_len": len(body.get("poToken") or ""),
+                                       "has_binding": bool(body.get("contentBinding"))}
+        except Exception as e:
+            res["pot_selfcall"] = {"http": "ERR", "error": str(e)[:200]}
         return res
 
     if request.query_params.get("diag") == "ff":
