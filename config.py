@@ -91,7 +91,7 @@ if not POT_SERVER_URL and IS_SERVERLESS and os.getenv("VERCEL_URL"):
 
 # Player clients tried in order. "tv" + PO token works best on datacenter IPs.
 YOUTUBE_CLIENTS = [
-    c.strip() for c in os.getenv("YOUTUBE_CLIENTS", "tv,web_safari,web").split(",") if c.strip()
+    c.strip() for c in os.getenv("YOUTUBE_CLIENTS", "web,web_safari,tv").split(",") if c.strip()
 ]
 # fetch_pot: always | auto | never  ("always" → attach PO token to player request)
 FETCH_POT = os.getenv("FETCH_POT", "always" if POT_SERVER_URL else "auto")

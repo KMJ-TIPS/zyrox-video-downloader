@@ -4,6 +4,7 @@ Extract info, build quality menus, download with progress hooks.
 Runs blocking calls inside a ThreadPoolExecutor from the handlers.
 """
 
+import base64
 import os
 import time
 
@@ -47,6 +48,24 @@ def _find_ffmpeg() -> str | None:
 FFMPEG_PATH = _find_ffmpeg()
 
 
+_VISITOR_DATA: str | None = None
+
+
+def _visitor_data() -> str:
+    """Per-process anonymous visitor ID for Innertube requests.
+
+    GVS PO tokens (needed for SABR streaming URLs) require visitor_data,
+    which normally comes from the YouTube webpage — but the webpage is
+    the most-blocked endpoint (429 / bot-check) and is skipped. A fresh
+    random visitor ID in the standard visitorData protobuf shape
+    (field 1, 11 random bytes) works as an anonymous client identifier.
+    """
+    global _VISITOR_DATA
+    if _VISITOR_DATA is None:
+        _VISITOR_DATA = base64.urlsafe_b64encode(b"\n\x0b" + os.urandom(11)).decode()
+    return _VISITOR_DATA
+
+
 def _extractor_args(clients: list[str] | None = None, use_pot: bool | None = None) -> dict:
     """YouTube anti-bot configuration: clients + PO-token provider.
 
@@ -59,6 +78,12 @@ def _extractor_args(clients: list[str] | None = None, use_pot: bool | None = Non
     args = {
         "youtube": {
             "player_client": effective,
+            # Skip the webpage fetch: it is the most-blocked endpoint
+            # (429 / bot-check from datacenter IPs) and gates the whole
+            # extract. Title/thumbnail/duration come from the player API.
+            "player_skip": ["webpage"],
+            # Anonymous visitor ID — required for GVS PO tokens (SABR).
+            "visitor_data": [_visitor_data()],
         }
     }
     if use_pot and config.FETCH_POT in ("always", "auto", "never"):
@@ -109,9 +134,10 @@ def is_botcheck_error(err_text: str) -> bool:
 
 
 # Fallback chains when the primary attempt hits the bot-check wall.
-# Embedded clients (web_embedded / tv_embedded) face less scrutiny than
-# the main web client; plain android/web are the last-resort clients.
-_RETRY_NO_POT = ["tv", "web_safari", "mweb", "web_embedded", "tv_embedded"]
+# WEB FIRST: the web client accepts the PO token and returns a player
+# response; tv gets bot-checked even with a token. Embedded clients
+# face less scrutiny than the main web client.
+_RETRY_NO_POT = ["web", "web_safari", "mweb", "web_embedded", "tv_embedded", "tv"]
 _RETRY_EXOTIC = ["ios", "tv_simply", "android_vr", "android", "web"]
 
 
