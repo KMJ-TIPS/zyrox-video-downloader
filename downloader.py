@@ -81,6 +81,14 @@ def _base_opts(clients: list[str] | None = None, use_pot: bool | None = None) ->
         "retries": 3,
         "extractor_args": _extractor_args(clients, use_pot),
     }
+    # TLS fingerprint impersonation (needs pip: curl_cffi). Python's
+    # default TLS fingerprint is a strong bot signal; impersonating a
+    # real browser removes it. Skipped silently if curl_cffi is absent.
+    try:
+        import curl_cffi  # noqa: F401
+        opts["impersonate"] = "chrome"
+    except Exception:
+        pass
     if config.YTDLP_PROXY:
         opts["proxy"] = config.YTDLP_PROXY
     if FFMPEG_PATH:
@@ -97,9 +105,11 @@ def is_botcheck_error(err_text: str) -> bool:
     return "sign in to confirm" in low or "not a bot" in low
 
 
-# Fallback chains when the primary attempt hits the bot-check wall
-_RETRY_NO_POT = ["tv", "web_safari", "mweb"]
-_RETRY_EXOTIC = ["ios", "tv_simply", "android_vr"]
+# Fallback chains when the primary attempt hits the bot-check wall.
+# Embedded clients (web_embedded / tv_embedded) face less scrutiny than
+# the main web client; plain android/web are the last-resort clients.
+_RETRY_NO_POT = ["tv", "web_safari", "mweb", "web_embedded", "tv_embedded"]
+_RETRY_EXOTIC = ["ios", "tv_simply", "android_vr", "android", "web"]
 
 
 def extract_info(url: str) -> dict:
@@ -137,6 +147,10 @@ def extract_info(url: str) -> dict:
             if not is_botcheck_error(last_err):
                 raise
             log_retry(url, extra)
+            # Brief pause: hammering the same IP with instant retries
+            # trips the rate limiter harder. A short gap lets a
+            # transient 429 clear before the next client tries.
+            time.sleep(2)
             continue
     raise DownloadError(last_err or "Extraction failed")
 
@@ -278,14 +292,20 @@ def download(
 
     opts["progress_hooks"] = [_hook]
 
-    attempts = [{}, {"clients": _RETRY_NO_POT, "use_pot": False}]
+    attempts = [
+        {},
+        {"clients": _RETRY_NO_POT, "use_pot": False},
+        {"clients": _RETRY_EXOTIC, "use_pot": False},
+    ]
     last_err: Exception | None = None
-    for extra in attempts:
+    for idx, extra in enumerate(attempts):
+        is_last = idx == len(attempts) - 1
         try:
             with YoutubeDL({**opts, **_base_opts(**extra)}) as ydl:
                 info = ydl.extract_info(url, download=True)
             if info and "entries" in info:
-                info = next((e for e in info["entries"] if e), None)
+                entries = [e for e in (info.get("entries") or []) if e]
+                info = entries[0] if entries else None
             rd = (info or {}).get("requested_downloads") or []
             if rd and rd[0].get("filepath"):
                 return rd[0]["filepath"], info
@@ -294,9 +314,10 @@ def download(
             raise
         except DownloadError as e:
             last_err = e
-            if not is_botcheck_error(str(e)) or extra:
+            if not is_botcheck_error(str(e)) or is_last:
                 raise
             log_retry(url, extra)
+            time.sleep(2)
             continue
 
     # fallback: newest file in download dir

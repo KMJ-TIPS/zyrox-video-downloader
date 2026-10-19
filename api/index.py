@@ -110,6 +110,12 @@ async def health(request: Request):
             node_info = {"node": "not found"}
         except Exception as e:
             node_info = {"node": f"error: {e}"}
+        # Anti-bot toolchain status: confirms the PO-token plugin,
+        # TLS impersonation and the JS runtime are actually present in
+        # this deployment (a missing piece here = YouTube bot-checks
+        # even with correct config).
+        import importlib.util as _ilu
+        _spec = lambda name: bool(_ilu.find_spec(name))
         return {
             "ffmpeg_path": downloader.FFMPEG_PATH,
             "ffmpeg_found": bool(downloader.FFMPEG_PATH),
@@ -120,6 +126,9 @@ async def health(request: Request):
             "clients": config.YOUTUBE_CLIENTS,
             "fetch_pot": config.FETCH_POT,
             "cookies": cookie_store.source(),
+            "pot_plugin_installed": _spec("bgutil_ytdlp_pot_provider"),
+            "curl_cffi_installed": _spec("curl_cffi"),
+            "quickjs_installed": _spec("quickjs"),
         }
     return {
         "ok": True,
