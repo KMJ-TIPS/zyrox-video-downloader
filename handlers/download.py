@@ -13,6 +13,7 @@ from telegram.constants import ChatAction, ParseMode
 from telegram.error import TelegramError
 from telegram.ext import ContextTypes
 
+import cobalt
 import config
 import database
 import downloader
@@ -27,6 +28,76 @@ log = logging.getLogger("zyrox")
 
 def _get_pool(context) -> ThreadPoolExecutor:
     return context.application.bot_data["pool"]
+
+
+async def _cobalt_fallback(update, context, url, status) -> bool:
+    """YouTube bot-check → fetch via a public cobalt instance.
+
+    Returns True when the fallback handled the request (file sent, direct
+    link shown, or a friendly size message). False = cobalt also failed,
+    caller falls through to the normal FETCH_FAILED message.
+    """
+    chat = update.effective_chat
+    user = update.effective_user
+    await common.safe_edit(status, texts.COBALT_TRYING)
+    try:
+        res = await asyncio.to_thread(cobalt.fetch, url, "video", "720")
+    except Exception as e:
+        log.warning("cobalt fetch failed: %s", e)
+        return False
+
+    if res["kind"] == "redirect":
+        # Direct googlevideo URL — the bot (Vercel IP) can't fetch it, but
+        # the user's phone can. Hand them the link instead of failing.
+        await common.safe_edit(status, texts.COBALT_REDIRECT.format(url=res["url"]))
+        return True
+
+    os.makedirs(config.DOWNLOAD_DIR, exist_ok=True)
+    dest = os.path.join(config.DOWNLOAD_DIR, res["filename"])
+    try:
+        total = await asyncio.to_thread(
+            cobalt.download_file, res["url"], dest,
+            config.MAX_FILESIZE_MB * 1024 * 1024,
+        )
+    except ValueError:
+        _cleanup(dest)
+        await common.safe_edit(status, texts.TOO_BIG.format(size=">50 MB"))
+        return True
+    except Exception as e:
+        log.warning("cobalt download failed: %s", e)
+        _cleanup(dest)
+        return False
+
+    size_txt = utils.human_size(total)
+    caption = texts.VIDEO_DONE.format(
+        title="YouTube Video",
+        platform="🎬 YouTube",
+        quality="720p (mirror)",
+        size=size_txt,
+    )
+    try:
+        with open(dest, "rb") as f:
+            await context.bot.send_video(
+                chat.id, video=f, caption=caption, parse_mode=ParseMode.HTML,
+                supports_streaming=True,
+                read_timeout=60, write_timeout=600,
+                connect_timeout=60, pool_timeout=60,
+            )
+    except TelegramError as e:
+        log.error("cobalt upload failed: %s", e)
+        await common.safe_edit(
+            status,
+            texts.FETCH_FAILED.format(reason="☁️ <b>Upload to Telegram failed.</b> Please try again."),
+        )
+        _cleanup(dest)
+        return True
+    _cleanup(dest)
+    try:
+        await status.delete()
+    except Exception:
+        pass
+    database.increment_download(user.id)
+    return True
 
 
 # ──────────────────────────────────────────────
@@ -58,6 +129,9 @@ async def handle_link(update: Update, context: ContextTypes.DEFAULT_TYPE, url: s
     except DownloadError as e:
         if downloader.is_botcheck_error(str(e)):
             await admin.notify_botcheck(context, url)
+            # YouTube bot-check → try the cobalt mirror before giving up.
+            if downloader._is_youtube(url) and await _cobalt_fallback(update, context, url, status):
+                return
         await common.safe_edit(status, texts.FETCH_FAILED.format(reason=utils.clean_error_message(str(e))))
         return
     except asyncio.TimeoutError:

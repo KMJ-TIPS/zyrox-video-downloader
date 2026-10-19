@@ -49,6 +49,21 @@ FETCH_FAILED = (
     "💡 Make sure the link is correct and public."
 )
 
+COBALT_TRYING = (
+    f"🔄 <b>TRYING MIRROR SERVER...</b> ⚡\n"
+    f"{SEP}\n"
+    "YouTube blocked this server, so I'm fetching\n"
+    "the video through a mirror — one moment..."
+)
+
+COBALT_REDIRECT = (
+    f"🔗 <b>DIRECT LINK READY</b> ⚡\n"
+    f"{SEP}\n"
+    "Tap to download the video directly\n"
+    "(opens in your browser):\n\n"
+    "{url}"
+)
+
 QUALITY_CAPTION = (
     f"📥 <b>READY TO DOWNLOAD</b> ⚡\n"
     f"{SEP}\n"
