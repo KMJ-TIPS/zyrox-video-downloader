@@ -97,6 +97,32 @@ async def health(request: Request):
         except Exception as e:
             return {"ok": False, "error": str(e)[:300]}
 
+    if request.query_params.get("diag") == "cobalt":
+        # Owner-only: test cobalt instances FROM Vercel (the real network).
+        # /api?diag=cobalt&url=...&key=WEBHOOK_SECRET
+        import cobalt
+        key_ok = (
+            not WEBHOOK_SECRET
+            or request.query_params.get("key") == WEBHOOK_SECRET
+        )
+        url = request.query_params.get("url", "")
+        if not key_ok:
+            return {"error": "unauthorized"}
+        if not url:
+            return {"error": "missing url param"}
+        results = []
+        for inst in cobalt._instances():
+            try:
+                res = cobalt._post(inst, {"url": url, "filenameStyle": "basic",
+                                           "downloadMode": "auto", "vQuality": "720"})
+                results.append({"instance": inst, "status": res.get("status"),
+                                "has_url": bool(res.get("url")),
+                                "error": (res.get("error") or {}).get("code", "")})
+            except Exception as e:
+                results.append({"instance": inst, "status": "EXC",
+                                "error": f"{type(e).__name__}: {str(e)[:200]}"})
+        return {"ok": True, "results": results}
+
     if request.query_params.get("diag") == "pot_trace":
         # Owner-only: single verbose extract capturing the PO-token
         # plugin's log lines (was a token fetched? attached? rejected?).
