@@ -97,6 +97,55 @@ async def health(request: Request):
         except Exception as e:
             return {"ok": False, "error": str(e)[:300]}
 
+    if request.query_params.get("diag") == "pot_trace":
+        # Owner-only: single verbose extract capturing the PO-token
+        # plugin's log lines (was a token fetched? attached? rejected?).
+        # /api?diag=pot_trace&url=...&key=WEBHOOK_SECRET
+        import asyncio
+        import downloader
+        key_ok = (
+            not WEBHOOK_SECRET
+            or request.query_params.get("key") == WEBHOOK_SECRET
+        )
+        url = request.query_params.get("url", "")
+        if not key_ok:
+            return {"error": "unauthorized"}
+        if not url:
+            return {"error": "missing url param"}
+        lines: list[str] = []
+
+        class _Cap:
+            def _push(self, msg):
+                s = str(msg)
+                low = s.lower()
+                if any(k in low for k in ("pot", "bgutil", "visitor", "429", "bot", "sign in", "attestation", "challenge", "impersonat")):
+                    lines.append(s[:300])
+            def debug(self, m): self._push(m)
+            def info(self, m): self._push(m)
+            def warning(self, m): self._push(m)
+            def error(self, m): self._push(m)
+            def trace(self, m): self._push(m)
+
+        def _run():
+            from yt_dlp import YoutubeDL
+            opts = downloader._base_opts()
+            opts.update({"skip_download": True, "quiet": False, "no_warnings": False,
+                         "verbose": True, "logger": _Cap(), "socket_timeout": 30, "retries": 1})
+            try:
+                with YoutubeDL(opts) as ydl:
+                    info = ydl.extract_info(url, download=False)
+                return {"ok": True, "title": (info.get("title") or "")[:80],
+                        "formats": len(info.get("formats") or [])}
+            except Exception as e:
+                return {"ok": False, "error": str(e)[:300]}
+        try:
+            res = await asyncio.wait_for(asyncio.to_thread(_run), timeout=280)
+        except Exception as e:
+            res = {"ok": False, "error": f"trace timeout/crash: {e}"[:300]}
+        res["pot_log"] = lines[-40:]
+        res["pot_url"] = config.POT_SERVER_URL
+        return res
+
     if request.query_params.get("diag") == "ff":
         import subprocess
         import cookies as cookie_store
