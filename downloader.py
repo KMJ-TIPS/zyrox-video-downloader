@@ -108,8 +108,25 @@ _PROXY_CACHE = {"list": [], "ts": 0.0}
 _LAST_GOOD_PROXY: str | None = None
 
 
+def _proxy_alive(proxy_url: str) -> bool:
+    """Cheap liveness check: can this proxy reach YouTube at all?
+    Any HTTP response (even 429) counts — only connect failures mean dead."""
+    try:
+        ph = urllib.request.ProxyHandler({"http": proxy_url, "https": proxy_url})
+        opener = urllib.request.build_opener(ph)
+        req = urllib.request.Request("https://www.youtube.com/",
+                                     headers={"User-Agent": "Mozilla/5.0"})
+        with opener.open(req, timeout=6) as r:
+            return True
+    except urllib.error.HTTPError:
+        return True  # an HTTP response = the proxy works
+    except Exception:
+        return False
+
+
 def _fetch_proxy_list() -> list[str]:
-    """Fresh public HTTP proxies, cached 10 minutes. Empty list on failure."""
+    """Fresh public HTTP proxies, pre-screened for liveness, cached 10 min.
+    Empty list on failure."""
     now = time.time()
     if _PROXY_CACHE["list"] and now - _PROXY_CACHE["ts"] < 600:
         return list(_PROXY_CACHE["list"])
@@ -117,7 +134,8 @@ def _fetch_proxy_list() -> list[str]:
     try:
         req = urllib.request.Request(
             "https://proxylist.geonode.com/api/proxy-list?limit=100&page=1"
-            "&sort_by=lastChecked&sort_type=desc&filterUpTime=70&filterProtocol=http",
+            "&sort_by=lastChecked&sort_type=desc&filterUpTime=70&filterProtocol=http"
+            "&filterGoogle=true",
             headers={"User-Agent": "zyrox/1.0"},
         )
         with urllib.request.urlopen(req, timeout=10) as r:
@@ -141,7 +159,20 @@ def _fetch_proxy_list() -> list[str]:
         except Exception:
             pass
     random.shuffle(lst)
-    _PROXY_CACHE.update({"list": lst[:60], "ts": now})
+    # Pre-screen: most free proxies are dead — only keep ones that can
+    # actually reach YouTube, so yt-dlp time isn't wasted on dead ones.
+    live: list[str] = []
+    try:
+        import concurrent.futures
+        with concurrent.futures.ThreadPoolExecutor(max_workers=10) as ex:
+            for proxy_url, ok in zip(lst[:30], ex.map(_proxy_alive, lst[:30])):
+                if ok:
+                    live.append(proxy_url)
+                if len(live) >= 8:
+                    break
+    except Exception:
+        live = lst[:8]
+    _PROXY_CACHE.update({"list": live, "ts": now})
     return list(_PROXY_CACHE["list"])
 
 
@@ -156,7 +187,7 @@ def _proxy_candidates() -> list:
     for p in _fetch_proxy_list():
         if p not in cands:
             cands.append(p)
-        if len(cands) >= 2:
+        if len(cands) >= 4:
             break
     cands.append(None)  # direct, last resort
     return cands
@@ -212,7 +243,8 @@ def is_proxy_failure(err_text: str) -> bool:
         "http error 502", "http error 503", "http error 504",
         "curl:", "empty reply", "network is unreachable",
         "name resolution", "proxy error", "bad gateway",
-        "service unavailable", "gateway timeout"))
+        "service unavailable", "gateway timeout",
+        "407", "authentication required"))
 
 
 # Fallback chains when the primary attempt hits the bot-check wall.
