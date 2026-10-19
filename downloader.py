@@ -11,6 +11,7 @@ from yt_dlp import YoutubeDL
 from yt_dlp.utils import DownloadCancelled, DownloadError
 
 import config
+import cookies as cookie_store
 import utils
 
 MAX_VIDEO_BUTTONS = 6
@@ -37,21 +38,30 @@ def _find_ffmpeg() -> str | None:
 FFMPEG_PATH = _find_ffmpeg()
 
 
-def _extractor_args() -> dict:
-    """YouTube anti-bot configuration: clients + PO-token provider."""
+def _extractor_args(clients: list[str] | None = None, use_pot: bool | None = None) -> dict:
+    """YouTube anti-bot configuration: clients + PO-token provider.
+
+    clients : override player client list (fallback attempts)
+    use_pot : force PO tokens on/off (None = auto: skip when cookies active)
+    """
+    if use_pot is None:
+        use_pot = bool(config.POT_SERVER_URL) and not cookie_store.active_path()
+    effective = clients or list(config.YOUTUBE_CLIENTS)
     args = {
         "youtube": {
-            "player_client": list(config.YOUTUBE_CLIENTS),
+            "player_client": effective,
         }
     }
-    if config.FETCH_POT in ("always", "auto", "never"):
+    if use_pot and config.FETCH_POT in ("always", "auto", "never"):
         args["youtube"]["fetch_pot"] = [config.FETCH_POT]
-    if config.POT_SERVER_URL:
+    elif not use_pot:
+        args["youtube"]["fetch_pot"] = ["never"]
+    if use_pot and config.POT_SERVER_URL:
         args["youtubepot-bgutilhttp"] = {"base_url": [config.POT_SERVER_URL]}
     return args
 
 
-def _base_opts() -> dict:
+def _base_opts(clients: list[str] | None = None, use_pot: bool | None = None) -> dict:
     opts = {
         "quiet": True,
         "no_warnings": True,
@@ -60,26 +70,66 @@ def _base_opts() -> dict:
         "nocheckcertificate": True,
         "socket_timeout": 30,
         "retries": 3,
-        "extractor_args": _extractor_args(),
+        "extractor_args": _extractor_args(clients, use_pot),
     }
     if config.YTDLP_PROXY:
         opts["proxy"] = config.YTDLP_PROXY
     if FFMPEG_PATH:
         opts["ffmpeg_location"] = FFMPEG_PATH
-    if config.COOKIES_FILE and os.path.exists(config.COOKIES_FILE):
-        opts["cookiefile"] = config.COOKIES_FILE
+    cookie_path = cookie_store.active_path()
+    if cookie_path and os.path.exists(cookie_path):
+        opts["cookiefile"] = cookie_path
     return opts
 
 
+def is_botcheck_error(err_text: str) -> bool:
+    """True when YouTube's datacenter-IP bot wall is the cause."""
+    low = (err_text or "").lower()
+    return "sign in to confirm" in low or "not a bot" in low
+
+
+# Fallback chains when the primary attempt hits the bot-check wall
+_RETRY_NO_POT = ["tv", "web_safari", "mweb"]
+_RETRY_EXOTIC = ["ios", "tv_simply", "android_vr"]
+
+
 def extract_info(url: str) -> dict:
-    """Blocking: fetch metadata (title, thumbnail, formats...)."""
-    with YoutubeDL({**_base_opts(), "skip_download": True}) as ydl:
-        info = ydl.extract_info(url, download=False)
-    if info and "entries" in info:
-        info = next((e for e in info["entries"] if e), None)
-    if not info:
-        raise DownloadError("No downloadable media found at this link")
-    return info
+    """Blocking: fetch metadata (title, thumbnail, formats...).
+
+    On YouTube bot-check walls it retries automatically:
+      1. normal attempt (PO tokens per config, cookies if installed)
+      2. no PO tokens + alternate clients
+      3. exotic clients without PO tokens
+    """
+    strategies = [
+        {},
+        {"clients": _RETRY_NO_POT, "use_pot": False},
+        {"clients": _RETRY_EXOTIC, "use_pot": False},
+    ]
+    last_err: str | None = None
+    for extra in strategies:
+        try:
+            with YoutubeDL({**_base_opts(**extra), "skip_download": True}) as ydl:
+                info = ydl.extract_info(url, download=False)
+            if info and "entries" in info:
+                info = next((e for e in info["entries"] if e), None)
+            if not info:
+                raise DownloadError("No downloadable media found at this link")
+            return info
+        except (DownloadCancelled, KeyboardInterrupt):
+            raise
+        except DownloadError as e:
+            last_err = str(e)
+            if not is_botcheck_error(last_err):
+                raise
+            log_retry(url, extra)
+            continue
+    raise DownloadError(last_err or "Extraction failed")
+
+
+def log_retry(url: str, extra: dict) -> None:
+    tag = ",".join(extra.get("clients") or config.YOUTUBE_CLIENTS)
+    print(f"[zyrox] bot-check on {url} → retrying with clients=[{tag}] pot={extra.get('use_pot')}")
 
 
 def _estimate_size(fmt: dict, duration: float):
@@ -210,19 +260,32 @@ def download(
 
     opts["progress_hooks"] = [_hook]
 
-    with YoutubeDL(opts) as ydl:
-        info = ydl.extract_info(url, download=True)
-        if info and "entries" in info:
-            info = next((e for e in info["entries"] if e), None)
-        rd = (info or {}).get("requested_downloads") or []
-        if rd and rd[0].get("filepath"):
-            return rd[0]["filepath"], info
+    attempts = [{}, {"clients": _RETRY_NO_POT, "use_pot": False}]
+    last_err: Exception | None = None
+    for extra in attempts:
+        try:
+            with YoutubeDL({**opts, **_base_opts(**extra)}) as ydl:
+                info = ydl.extract_info(url, download=True)
+            if info and "entries" in info:
+                info = next((e for e in info["entries"] if e), None)
+            rd = (info or {}).get("requested_downloads") or []
+            if rd and rd[0].get("filepath"):
+                return rd[0]["filepath"], info
+            break
+        except (DownloadCancelled, KeyboardInterrupt):
+            raise
+        except DownloadError as e:
+            last_err = e
+            if not is_botcheck_error(str(e)) or extra:
+                raise
+            log_retry(url, extra)
+            continue
 
     # fallback: newest file in download dir
     files = [os.path.join(config.DOWNLOAD_DIR, f) for f in os.listdir(config.DOWNLOAD_DIR)]
     if files:
         return max(files, key=os.path.getmtime), info or {}
-    raise DownloadError("Download finished but file was not found")
+    raise last_err or DownloadError("Download finished but file was not found")
 
 
 def find_cover_art(info: dict) -> str | None:

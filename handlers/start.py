@@ -190,6 +190,12 @@ async def route_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     mode = context.user_data.get("mode")
 
+    # 0) admin sends a cookies.txt file → install (no mode needed)
+    doc = message.document
+    if doc and common.is_admin(user.id) and "cookie" in (doc.file_name or "").lower():
+        await admin._do_cookies(update, context)
+        return
+
     # 1) admin conversation modes first
     if mode and common.is_admin(user.id):
         await admin.handle_mode_message(update, context)

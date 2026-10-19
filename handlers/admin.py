@@ -8,6 +8,7 @@ import logging
 import os
 import re
 import tempfile
+import time
 from datetime import datetime
 
 from telegram import Update
@@ -16,6 +17,7 @@ from telegram.error import Forbidden, TelegramError
 from telegram.ext import ContextTypes
 
 import config
+import cookies as cookie_store
 import database
 import keyboards
 import texts
@@ -162,6 +164,95 @@ async def _export_users(context, query):
         log.error("export failed: %s", e)
 
 
+# ───────────────────── YouTube bot-check owner alert ─────────────────────
+
+_botcheck_last = 0.0
+BOTCHECK_COOLDOWN = 6 * 3600  # seconds between owner alerts
+
+
+def _cookies_status_label() -> str:
+    src = cookie_store.source()
+    return {"uploaded": "✅ active (uploaded)", "env": "✅ active (env var)", "none": "❌ none"}.get(src, src)
+
+
+async def notify_botcheck(context, url: str) -> None:
+    """DM every admin the cookies fix guide (rate-limited)."""
+    global _botcheck_last
+    now = time.time()
+    if now - _botcheck_last < BOTCHECK_COOLDOWN:
+        return
+    _botcheck_last = now
+    for admin_id in common.admin_ids():
+        try:
+            await context.bot.send_message(
+                admin_id,
+                texts.OWNER_BOTCHECK.format(url=url, status=_cookies_status_label()),
+                parse_mode=ParseMode.HTML,
+                disable_web_page_preview=True,
+            )
+        except TelegramError:
+            pass
+
+
+# ───────────────────── cookies management (/cookies) ─────────────────────
+
+async def cmd_cookies(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user = update.effective_user
+    if not user or not common.is_admin(user.id):
+        await common.reply_html(update, texts.ADMIN_DENIED)
+        return
+    if cookie_store.source() == "none":
+        context.user_data["mode"] = "cookies_upload"
+        await common.reply_html(update, texts.COOKIES_STATUS_OFF)
+    else:
+        context.user_data["mode"] = "cookies_upload"
+        await common.reply_html(
+            update, texts.COOKIES_STATUS_ON.format(source=_cookies_status_label())
+        )
+
+
+async def cmd_cookies_off(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user = update.effective_user
+    if not user or not common.is_admin(user.id):
+        await common.reply_html(update, texts.ADMIN_DENIED)
+        return
+    cookie_store.clear_uploaded()
+    await common.reply_html(update, texts.COOKIES_CLEARED)
+
+
+async def _do_cookies(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    message = update.effective_message
+    content: str | None = None
+
+    doc = message.document
+    if doc is not None:
+        if (doc.file_size or 0) > 2 * 1024 * 1024:
+            await message.reply_html(texts.COOKIES_BAD.format(err="file too large (max 2 MB)"))
+            return
+        try:
+            tg_file = await doc.get_file()
+            data = await tg_file.download_as_bytearray()
+            content = bytes(data).decode("utf-8", errors="replace")
+        except TelegramError as e:
+            log.error("cookies download failed: %s", e)
+            await message.reply_html(
+                texts.COOKIES_BAD.format(err="could not read that file from Telegram")
+            )
+            return
+    else:
+        content = message.text or ""
+
+    err = cookie_store.validate(content or "")
+    if err:
+        await message.reply_html(texts.COOKIES_BAD.format(err=err))
+        return
+
+    cookie_store.install_from_text(content)
+    context.user_data["mode"] = None
+    await message.reply_html(texts.COOKIES_SAVED)
+    log.info("cookies installed by owner (%s bytes)", len(content))
+
+
 # ───────────────────── conversation modes ─────────────────────
 
 async def handle_mode_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -174,6 +265,8 @@ async def handle_mode_message(update: Update, context: ContextTypes.DEFAULT_TYPE
     elif mode == "add_channel":
         context.user_data["mode"] = None
         await _do_add_channel(update, context)
+    elif mode == "cookies_upload":
+        await _do_cookies(update, context)
 
 
 async def _do_broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE):

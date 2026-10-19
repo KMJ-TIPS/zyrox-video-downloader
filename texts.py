@@ -287,6 +287,75 @@ NEW_USER_ALERT = (
 
 MODE_CANCELLED = "❌ <b>Cancelled.</b> Back to normal mode ⚡"
 
+# ───────────────────── COOKIES (owner tool) ─────────────────────
+
+COOKIES_STATUS_ON = (
+    f"🍪 <b>COOKIES STATUS</b> ⚡\n"
+    f"{SEP}\n"
+    "✅ <b>Cookies are ACTIVE</b> ({source})\n\n"
+    "YouTube / Instagram downloads should work.\n\n"
+    "▸ Send a new <b>cookies.txt</b> file now to replace it\n"
+    "▸ /cookies_off — remove uploaded cookies\n"
+    "❌ /cancel — abort"
+)
+
+COOKIES_STATUS_OFF = (
+    f"🍪 <b>COOKIES STATUS</b> ⚡\n"
+    f"{SEP}\n"
+    "❌ <b>No cookies installed.</b>\n\n"
+    "On Vercel / serverless hosting, YouTube blocks the server IP "
+    "and asks to <b>sign in</b>. Cookies fix this — they make the "
+    "bot look like a logged-in browser.\n\n"
+    "📤 <b>Send me your cookies.txt file now</b> (or paste its text).\n"
+    "I will install it instantly and YouTube will start working.\n\n"
+    "❌ /cancel — abort"
+)
+
+COOKIES_BAD = (
+    "⚠️ <b>That doesn't look like a cookies.txt file.</b>\n\n"
+    "{err}\n\n"
+    "Try again — send the file or paste its text.\n"
+    "❌ /cancel — abort"
+)
+
+COOKIES_SAVED = (
+    f"✅ <b>COOKIES INSTALLED!</b> ⚡\n"
+    f"{SEP}\n"
+    "🍪 Source: <b>uploaded by owner</b>\n"
+    "💡 Try a YouTube link right now —\n"
+    "the bot-check should be gone.\n\n"
+    "⚠️ On Vercel this resets on cold starts.\n"
+    "For a permanent fix also set the\n"
+    "<code>YOUTUBE_COOKIES</code> env var (see my DM guide)."
+)
+
+COOKIES_CLEARED = (
+    f"🗑 <b>Cookies removed.</b>\n"
+    "Back to cookie-free mode ⚡"
+)
+
+OWNER_BOTCHECK = (
+    f"🤖 <b>OWNER ALERT — YOUTUBE BLOCKED</b> ⚡\n"
+    f"{SEP}\n"
+    "A user sent a YouTube link and the server IP got\n"
+    "bot-checked by YouTube.\n\n"
+    "🔗 {url}\n"
+    "🍪 Cookies status: {status}\n\n"
+    "<b>━━━ HOW TO FIX (2 minutes) ━━━</b>\n\n"
+    "<b>STEP 1 — Get cookies.txt</b>\n"
+    "1. Chrome/Edge me <b>Get cookies.txt LOCALLY</b> extension install karo\n"
+    "2. youtube.com open karo aur <b>login</b> karo (throwaway account best)\n"
+    "3. Extension icon dabao → <b>Export</b> → cookies.txt milega\n\n"
+    "<b>STEP 2 — Bot me bhejo (instant fix)</b>\n"
+    "4. Is bot ko <b>/cookies</b> bhejo → cookies.txt file attach karke send karo ✅\n\n"
+    "<b>STEP 3 — Vercel me permanent fix</b>\n"
+    "5. vercel.com → apna project → <b>Settings → Environment Variables</b>\n"
+    "6. Naam: <code>YOUTUBE_COOKIES</code>\n"
+    "7. Value: cookies.txt file ka <b>poora content paste</b> karo\n"
+    "8. <b>Save</b> → Deployments → latest deploy → <b>Redeploy</b>\n\n"
+    "⚡ Uske baad YouTube + Instagram dono smooth chalega!"
+)
+
 ADMIN_ERR_CHANNEL = (
     "❌ <b>Could not find that channel!</b>\n\n"
     "Check these:\n"

@@ -95,6 +95,8 @@ def build_application(serverless: bool = False) -> Application:
     app.add_handler(CommandHandler("sites", start.cmd_sites))
     app.add_handler(CommandHandler("id", start.cmd_id))
     app.add_handler(CommandHandler("admin", admin.cmd_admin))
+    app.add_handler(CommandHandler("cookies", admin.cmd_cookies))
+    app.add_handler(CommandHandler("cookies_off", admin.cmd_cookies_off))
     app.add_handler(CommandHandler("cancel", admin.cmd_cancel))
 
     # callbacks

@@ -84,6 +84,7 @@ async def health(request: Request):
                 config.YOUTUBE_CLIENTS = saved
             fmts = info.get("formats") or []
             heights = sorted({f.get("height") for f in fmts if f.get("height")}, reverse=True)
+            import cookies as cookie_store
             return {
                 "ok": True,
                 "title": (info.get("title") or "")[:80],
@@ -91,12 +92,14 @@ async def health(request: Request):
                 "formats": len(fmts),
                 "heights": heights[:8],
                 "pot": bool(config.POT_SERVER_URL),
+                "cookies": cookie_store.source(),
             }
         except Exception as e:
             return {"ok": False, "error": str(e)[:300]}
 
     if request.query_params.get("diag") == "ff":
         import subprocess
+        import cookies as cookie_store
         import downloader
         import yt_dlp
         node_info = {}
@@ -116,7 +119,7 @@ async def health(request: Request):
             "pot_url": config.POT_SERVER_URL,
             "clients": config.YOUTUBE_CLIENTS,
             "fetch_pot": config.FETCH_POT,
-            "cookies": bool(config.COOKIES_FILE),
+            "cookies": cookie_store.source(),
         }
     return {
         "ok": True,

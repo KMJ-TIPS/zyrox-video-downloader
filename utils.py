@@ -113,8 +113,9 @@ def clean_error_message(err_text: str) -> str:
     if "sign in to confirm" in low or "not a bot" in low:
         return (
             "🤖 <b>YouTube bot-check blocked this server.</b>\n\n"
-            "💡 The owner can fix this by adding <b>YOUTUBE_COOKIES</b> "
-            "(or a proxy) in the hosting settings."
+            "💡 The owner can fix this in 2 minutes — send "
+            "<b>/cookies</b> here and follow the guide "
+            "(or set the YOUTUBE_COOKIES env var on the host)."
         )
     if any(k in low for k in ("login", "cookies", "sign in", "age", "private", "authentication")):
         return "🔒 This content is <b>private or requires login</b>.\n   (Instagram/age-restricted content may need cookies)"
