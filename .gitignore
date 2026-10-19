@@ -12,6 +12,9 @@ zyrox.db
 *.session
 .env
 
+# Bundled static ffmpeg (kept out of git, included in Vercel deploys)
+bin/
+
 # Secrets / cookies (never commit)
 cookies.txt
 *.cookies
@@ -21,3 +24,5 @@ cookies.txt
 Thumbs.db
 .idea/
 .vscode/
+.vercel
+.env*

@@ -19,7 +19,8 @@ def _now() -> str:
 def init() -> None:
     """Create tables if they do not exist."""
     global _conn
-    os.makedirs(config.BASE_DIR, exist_ok=True)
+    os.makedirs(os.path.dirname(config.DATABASE_PATH), exist_ok=True)
+    os.makedirs(config.DOWNLOAD_DIR, exist_ok=True)
     _conn = sqlite3.connect(config.DATABASE_PATH, check_same_thread=False)
     _conn.row_factory = sqlite3.Row
     _conn.execute(

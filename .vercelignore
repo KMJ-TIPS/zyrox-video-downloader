@@ -1,0 +1,14 @@
+# Exclude from Vercel deployment — bin/ (ffmpeg) IS intentionally included
+.git
+.github
+*.md
+install_termux.sh
+run.sh
+downloads/*
+!downloads/.gitkeep
+zyrox.db
+*.pyc
+__pycache__
+.env
+cookies.txt
+*.cookies

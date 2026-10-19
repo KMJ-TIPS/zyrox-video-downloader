@@ -19,6 +19,24 @@ AUDIO_BITRATES = [320, 192, 128]
 _KNOWN_HEIGHTS = (4320, 2880, 2160, 1440, 1080, 720, 480, 360, 240, 144)
 
 
+def _find_ffmpeg() -> str | None:
+    """Prefer the bundled static ffmpeg, then any system ffmpeg."""
+    here = os.path.dirname(os.path.abspath(__file__))
+    for cand in (
+        os.path.join(here, "bin", "ffmpeg"),
+        os.path.join(here, "bin", "ffmpeg.exe"),
+        os.environ.get("FFMPEG_PATH", ""),
+        "/usr/bin/ffmpeg",
+        "/usr/local/bin/ffmpeg",
+    ):
+        if cand and os.path.isfile(cand) and os.access(cand, os.X_OK):
+            return cand
+    return None
+
+
+FFMPEG_PATH = _find_ffmpeg()
+
+
 def _base_opts() -> dict:
     opts = {
         "quiet": True,
@@ -30,6 +48,8 @@ def _base_opts() -> dict:
         "retries": 3,
         "extractor_args": {"youtube": {"player_client": ["android", "web"]}},
     }
+    if FFMPEG_PATH:
+        opts["ffmpeg_location"] = FFMPEG_PATH
     if config.COOKIES_FILE and os.path.exists(config.COOKIES_FILE):
         opts["cookiefile"] = config.COOKIES_FILE
     return opts

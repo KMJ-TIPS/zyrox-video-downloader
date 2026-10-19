@@ -64,33 +64,29 @@ async def error_handler(update: object, context) -> None:
         pass
 
 
-# ───────────────────── main ─────────────────────
+# ───────────────────── application factory ─────────────────────
 
-def main():
-    print(BANNER.format(version=config.BOT_VERSION))
+def build_application(serverless: bool = False) -> Application:
+    """Build a fully configured Application.
 
-    if not config.BOT_TOKEN or "PASTE_YOUR" in config.BOT_TOKEN:
-        print("\n❌ BOT TOKEN MISSING!")
-        print("   1. Open @BotFather on Telegram")
-        print("   2. Send /newbot and follow steps")
-        print("   3. Copy the token into config.py → BOT_TOKEN\n")
-        sys.exit(1)
-
-    database.init()
-    os.makedirs(config.DOWNLOAD_DIR, exist_ok=True)
-
-    app = (
+    serverless=False → long-polling (Termux / VPS, run via `python bot.py`)
+    serverless=True  → webhook mode (Vercel; updates delivered via api/index.py)
+    """
+    builder = (
         Application.builder()
         .token(config.BOT_TOKEN)
-        .concurrent_updates(True)
         .read_timeout(60)
         .write_timeout(120)
         .connect_timeout(30)
         .pool_timeout(30)
         .media_write_timeout(3600)
-        .build()
     )
+    if serverless:
+        builder = builder.updater(None)
+
+    app = builder.build()
     app.bot_data["pool"] = ThreadPoolExecutor(max_workers=config.MAX_CONCURRENT_DOWNLOADS)
+    app.bot_data["serverless"] = serverless
 
     # commands
     app.add_handler(CommandHandler("start", start.cmd_start))
@@ -113,6 +109,29 @@ def main():
     )
 
     app.add_error_handler(error_handler)
+    return app
+
+
+class _SentinelUpdater:
+    """Deprecated placeholder — kept for backwards compatibility."""
+
+
+# ───────────────────── main ─────────────────────
+
+def main():
+    print(BANNER.format(version=config.BOT_VERSION))
+
+    if not config.BOT_TOKEN or "PASTE_YOUR" in config.BOT_TOKEN:
+        print("\n❌ BOT TOKEN MISSING!")
+        print("   1. Open @BotFather on Telegram")
+        print("   2. Send /newbot and follow steps")
+        print("   3. Copy the token into config.py → BOT_TOKEN\n")
+        sys.exit(1)
+
+    database.init()
+    os.makedirs(config.DOWNLOAD_DIR, exist_ok=True)
+
+    app = build_application(serverless=False)
 
     channels = ", ".join(config.DEFAULT_CHANNELS) or "—"
     log.info("Force-join channels: %s", channels)

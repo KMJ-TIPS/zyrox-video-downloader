@@ -44,6 +44,40 @@ bash run.sh
 
 ---
 
+## ☁️ Deploy on Vercel (free, 24/7, no phone needed)
+
+The same codebase runs in **webhook mode** on Vercel — already deployed and live.
+
+```bash
+# 1. Install the CLI
+npm i -g vercel
+
+# 2. From the project folder
+vercel link --project zyrox-video-downloader
+vercel deploy --prod
+```
+
+**Environment variables** (Vercel dashboard → Project → Settings → Environment Variables):
+
+| Key | Value |
+|---|---|
+| `BOT_TOKEN` | your BotFather token |
+| `ADMIN_IDS` | your Telegram user id |
+| `WEBHOOK_SECRET` | any random string (recommended) |
+| `MAX_FILESIZE_MB` | `50` |
+
+Then point Telegram at your deployment:
+
+```
+https://api.telegram.org/bot<TOKEN>/setWebhook?url=https://<project>.vercel.app/api&secret_token=<WEBHOOK_SECRET>
+```
+
+Bundled `bin/ffmpeg` (git-ignored) is included automatically in deploys — video merge + MP3 work out of the box. Health check: `https://<project>.vercel.app/api` • Diagnostics: `?diag=ff`.
+
+> ⚠️ **Vercel notes:** serverless = stateless. The SQLite DB lives in `/tmp` per warm instance, so the user list / admin-added channels reset on cold starts (fine for personal use). YouTube may sometimes require cookies on datacenter IPs — set `COOKIES_FILE` if needed. For heavy use, Termux/VPS long-polling mode is more reliable.
+
+---
+
 ## 👑 First owner
 
 The **first user who presses /start** becomes the owner automatically.

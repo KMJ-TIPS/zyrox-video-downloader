@@ -49,9 +49,15 @@ PROGRESS_INTERVAL = 2.5
 # ──────────────────────────────────────────────
 # 5. PATHS
 # ──────────────────────────────────────────────
+# On Vercel (serverless) only /tmp is writable — keep runtime files there.
+IS_SERVERLESS = bool(os.getenv("VERCEL"))
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-DOWNLOAD_DIR = os.path.join(BASE_DIR, "downloads")
-DATABASE_PATH = os.path.join(BASE_DIR, "zyrox.db")
+if IS_SERVERLESS:
+    RUNTIME_DIR = "/tmp/zyrox"
+else:
+    RUNTIME_DIR = BASE_DIR
+DOWNLOAD_DIR = os.path.join(RUNTIME_DIR, "downloads")
+DATABASE_PATH = os.path.join(RUNTIME_DIR, "zyrox.db")
 
 # ──────────────────────────────────────────────
 # 6. OPTIONAL: cookies.txt for Instagram / private content
