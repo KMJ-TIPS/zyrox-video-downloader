@@ -176,9 +176,24 @@ def _fetch_proxy_list() -> list[str]:
     return list(_PROXY_CACHE["list"])
 
 
-def _proxy_candidates() -> list:
+def _is_youtube(url: str) -> bool:
+    low = (url or "").lower()
+    return "youtube.com" in low or "youtu.be" in low
+
+
+def _proxy_candidates(url: str = "") -> list:
     """Ordered proxy attempts: static env proxy, last-good, fresh ones,
-    then direct (None) as the final fallback."""
+    then direct (None) as the final fallback.
+
+    Rotation applies to YouTube only — it is the platform that blocks
+    datacenter IPs. Other platforms use the static proxy (if set) or
+    direct, so working platforms don't slow down."""
+    if url and not _is_youtube(url):
+        return [config.YTDLP_PROXY or None]
+    return _proxy_candidates_youtube()
+
+
+def _proxy_candidates_youtube() -> list:
     cands: list = []
     if config.YTDLP_PROXY and config.YTDLP_PROXY not in cands:
         cands.append(config.YTDLP_PROXY)
@@ -267,7 +282,7 @@ def extract_info(url: str) -> dict:
     """
     global _LAST_GOOD_PROXY
     last_err: str | None = None
-    for proxy in _proxy_candidates():
+    for proxy in _proxy_candidates(url):
         is_proxy = proxy is not None
         strategies = [
             {"proxy": proxy, "socket_timeout": 15 if is_proxy else 30,
@@ -434,7 +449,7 @@ def download(
 
     last_err: Exception | None = None
     info: dict | None = None
-    for proxy in _proxy_candidates():
+    for proxy in _proxy_candidates(url):
         is_proxy = proxy is not None
         if mode == "audio":
             opts = {
