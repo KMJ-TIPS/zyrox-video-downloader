@@ -58,14 +58,65 @@ app = FastAPI(title="ZYROX VIDEO DOWNLOADER")
 @app.get("/api/")
 async def health(request: Request):
     """GET /  →  served at https://<project>.vercel.app/api"""
+    if request.query_params.get("diag") == "extract":
+        # owner-only extraction test: /api?diag=extract&url=...&key=WEBHOOK_SECRET
+        import asyncio
+        import downloader
+        key_ok = (
+            not WEBHOOK_SECRET
+            or request.query_params.get("key") == WEBHOOK_SECRET
+        )
+        url = request.query_params.get("url", "")
+        if not key_ok:
+            return {"error": "unauthorized"}
+        if not url:
+            return {"error": "missing url param"}
+        try:
+            clients = request.query_params.get("clients")
+            saved = config.YOUTUBE_CLIENTS
+            if clients:
+                config.YOUTUBE_CLIENTS = [c.strip() for c in clients.split(",") if c.strip()]
+            try:
+                info = await asyncio.wait_for(
+                    asyncio.to_thread(downloader.extract_info, url), timeout=280
+                )
+            finally:
+                config.YOUTUBE_CLIENTS = saved
+            fmts = info.get("formats") or []
+            heights = sorted({f.get("height") for f in fmts if f.get("height")}, reverse=True)
+            return {
+                "ok": True,
+                "title": (info.get("title") or "")[:80],
+                "duration": info.get("duration"),
+                "formats": len(fmts),
+                "heights": heights[:8],
+                "pot": bool(config.POT_SERVER_URL),
+            }
+        except Exception as e:
+            return {"ok": False, "error": str(e)[:300]}
+
     if request.query_params.get("diag") == "ff":
+        import subprocess
         import downloader
         import yt_dlp
+        node_info = {}
+        try:
+            r = subprocess.run(["node", "--version"], capture_output=True, text=True, timeout=10)
+            node_info = {"node": r.stdout.strip() or r.stderr.strip(), "rc": r.returncode}
+        except FileNotFoundError:
+            node_info = {"node": "not found"}
+        except Exception as e:
+            node_info = {"node": f"error: {e}"}
         return {
             "ffmpeg_path": downloader.FFMPEG_PATH,
             "ffmpeg_found": bool(downloader.FFMPEG_PATH),
             "yt_dlp": yt_dlp.version.__version__,
             "runtime_dir": config.RUNTIME_DIR,
+            "node": node_info,
+            "pot_url": config.POT_SERVER_URL,
+            "clients": config.YOUTUBE_CLIENTS,
+            "fetch_pot": config.FETCH_POT,
+            "cookies": bool(config.COOKIES_FILE),
         }
     return {
         "ok": True,

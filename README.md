@@ -72,9 +72,24 @@ Then point Telegram at your deployment:
 https://api.telegram.org/bot<TOKEN>/setWebhook?url=https://<project>.vercel.app/api&secret_token=<WEBHOOK_SECRET>
 ```
 
-Bundled `bin/ffmpeg` (git-ignored) is included automatically in deploys — video merge + MP3 work out of the box. Health check: `https://<project>.vercel.app/api` • Diagnostics: `?diag=ff`.
+Bundled `bin/ffmpeg` (git-ignored) is included automatically in deploys — video merge + MP3 work out of the box. Health check: `https://<project>.vercel.app/api` • Diagnostics: `?diag=ff`, `?diag=extract&url=...&key=<WEBHOOK_SECRET>`.
 
-> ⚠️ **Vercel notes:** serverless = stateless. The SQLite DB lives in `/tmp` per warm instance, so the user list / admin-added channels reset on cold starts (fine for personal use). YouTube may sometimes require cookies on datacenter IPs — set `COOKIES_FILE` if needed. For heavy use, Termux/VPS long-polling mode is more reliable.
+### 🤖 YouTube on serverless (bot-check)
+
+YouTube blocks datacenter IPs (Vercel/Railway/…) with *"Sign in to confirm you're not a bot"*. This deployment ships with:
+
+- **PO-token provider** — a bgutil BotGuard generator runs as a Node function at `/api/pot` (bundled `api/pot_lib.cjs`, plugin via `bgutil-ytdlp-pot-provider`). Tokens are auto-fetched (`fetch_pot=always`, clients `tv,web_safari,web`).
+- **Cookies support** — paste your cookies.txt content into the `YOUTUBE_COOKIES` env var; it is written to `/tmp` and used automatically. **This is required for YouTube to work on Vercel.**
+
+How to get cookies (2 minutes):
+1. On your PC browser install **"Get cookies.txt LOCALLY"** (Chrome/Edge/Firefox extension)
+2. Log in to [youtube.com](https://youtube.com) (any account)
+3. On a YouTube tab, export cookies (**Netscape format**)
+4. Vercel dashboard → your project → Settings → Environment Variables → add `YOUTUBE_COOKIES` = full exported text → Redeploy
+
+Also supported env vars: `POT_SERVER_URL` (external bgutil server), `YOUTUBE_CLIENTS` (e.g. `tv,web_safari,web`), `FETCH_POT` (`always`/`auto`/`never`), `YTDLP_PROXY` (http/socks5 proxy as alternative to cookies). On Termux (residential IP) none of this is needed.
+
+> ⚠️ **Vercel notes:** serverless = stateless. The SQLite DB lives in `/tmp` per warm instance, so the user list / admin-added channels reset on cold starts (fine for personal use). Instagram may also need cookies (`YOUTUBE_COOKIES` works for it too). For heavy use, Termux/VPS long-polling mode is more reliable.
 
 ---
 

@@ -110,6 +110,12 @@ def quality_name(height: int) -> str:
 def clean_error_message(err_text: str) -> str:
     """Map common yt-dlp errors to friendly English messages."""
     low = (err_text or "").lower()
+    if "sign in to confirm" in low or "not a bot" in low:
+        return (
+            "🤖 <b>YouTube bot-check blocked this server.</b>\n\n"
+            "💡 The owner can fix this by adding <b>YOUTUBE_COOKIES</b> "
+            "(or a proxy) in the hosting settings."
+        )
     if any(k in low for k in ("login", "cookies", "sign in", "age", "private", "authentication")):
         return "🔒 This content is <b>private or requires login</b>.\n   (Instagram/age-restricted content may need cookies)"
     if any(k in low for k in ("not available", "unavailable", "removed", "404")):

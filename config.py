@@ -66,10 +66,43 @@ DATABASE_PATH = os.path.join(RUNTIME_DIR, "zyrox.db")
 # Example: "/data/data/com.termux/files/home/cookies.txt"
 COOKIES_FILE = os.getenv("COOKIES_FILE", "")
 
+# Or paste raw cookies.txt content into the YOUTUBE_COOKIES env var
+# (recommended on Vercel — no file upload needed). It is written to
+# the runtime dir at startup and used for YouTube/Instagram.
+_yt_cookies_raw = os.getenv("YOUTUBE_COOKIES", "").strip()
+if _yt_cookies_raw:
+    try:
+        os.makedirs(RUNTIME_DIR, exist_ok=True)
+        _cookie_path = os.path.join(RUNTIME_DIR, "cookies.txt")
+        with open(_cookie_path, "w", encoding="utf-8") as _f:
+            _f.write(_yt_cookies_raw.replace("\\n", "\n") + "\n")
+        COOKIES_FILE = COOKIES_FILE or _cookie_path
+    except OSError:
+        pass
+
 # ──────────────────────────────────────────────
-# 7. BRANDING
+# 7. YOUTUBE ANTI-BOT (PO token provider / proxy)
+# ──────────────────────────────────────────────
+# On serverless (datacenter IPs) YouTube demands PO tokens.
+# POT_SERVER_URL points to a bgutil HTTP provider (see api/pot.js).
+POT_SERVER_URL = os.getenv("POT_SERVER_URL", "")
+if not POT_SERVER_URL and IS_SERVERLESS and os.getenv("VERCEL_URL"):
+    POT_SERVER_URL = f"https://{os.getenv('VERCEL_URL')}/api/pot"
+
+# Player clients tried in order. "tv" + PO token works best on datacenter IPs.
+YOUTUBE_CLIENTS = [
+    c.strip() for c in os.getenv("YOUTUBE_CLIENTS", "tv,web_safari,web").split(",") if c.strip()
+]
+# fetch_pot: always | auto | never  ("always" → attach PO token to player request)
+FETCH_POT = os.getenv("FETCH_POT", "always" if POT_SERVER_URL else "auto")
+
+# Optional outbound proxy for yt-dlp (http/socks5 URL), e.g. http://user:pass@host:port
+YTDLP_PROXY = os.getenv("YTDLP_PROXY", "")
+
+# ──────────────────────────────────────────────
+# 8. BRANDING
 # ──────────────────────────────────────────────
 BOT_NAME = "ZYROX VIDEO DOWNLOADER"
-BOT_VERSION = "1.0"
+BOT_VERSION = "1.1"
 UPDATE_CHANNEL = "Zyroxv1"          # shown in buttons / credits
 UPDATE_CHANNEL_URL = "https://t.me/Zyroxv1"

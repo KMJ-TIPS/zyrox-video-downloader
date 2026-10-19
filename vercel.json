@@ -4,6 +4,16 @@
     "api/index.py": {
       "maxDuration": 300,
       "memory": 1024
+    },
+    "api/pot.js": {
+      "maxDuration": 60,
+      "memory": 1024
     }
-  }
+  },
+  "rewrites": [
+    { "source": "/api/pot/get_pot", "destination": "/api/pot" },
+    { "source": "/api/pot/ping", "destination": "/api/pot" },
+    { "source": "/api/pot/invalidate_caches", "destination": "/api/pot" },
+    { "source": "/api/pot/invalidate_it", "destination": "/api/pot" }
+  ]
 }

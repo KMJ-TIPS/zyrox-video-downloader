@@ -37,6 +37,20 @@ def _find_ffmpeg() -> str | None:
 FFMPEG_PATH = _find_ffmpeg()
 
 
+def _extractor_args() -> dict:
+    """YouTube anti-bot configuration: clients + PO-token provider."""
+    args = {
+        "youtube": {
+            "player_client": list(config.YOUTUBE_CLIENTS),
+        }
+    }
+    if config.FETCH_POT in ("always", "auto", "never"):
+        args["youtube"]["fetch_pot"] = [config.FETCH_POT]
+    if config.POT_SERVER_URL:
+        args["youtubepot-bgutilhttp"] = {"base_url": [config.POT_SERVER_URL]}
+    return args
+
+
 def _base_opts() -> dict:
     opts = {
         "quiet": True,
@@ -46,8 +60,10 @@ def _base_opts() -> dict:
         "nocheckcertificate": True,
         "socket_timeout": 30,
         "retries": 3,
-        "extractor_args": {"youtube": {"player_client": ["android", "web"]}},
+        "extractor_args": _extractor_args(),
     }
+    if config.YTDLP_PROXY:
+        opts["proxy"] = config.YTDLP_PROXY
     if FFMPEG_PATH:
         opts["ffmpeg_location"] = FFMPEG_PATH
     if config.COOKIES_FILE and os.path.exists(config.COOKIES_FILE):
