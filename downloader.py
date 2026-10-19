@@ -21,7 +21,9 @@ _KNOWN_HEIGHTS = (4320, 2880, 2160, 1440, 1080, 720, 480, 360, 240, 144)
 
 
 def _find_ffmpeg() -> str | None:
-    """Prefer the bundled static ffmpeg, then any system ffmpeg."""
+    """Prefer the bundled static ffmpeg, then imageio-ffmpeg (pip),
+    then any system ffmpeg. The imageio fallback keeps MP3/merge working
+    on hosts without a bundled bin/ffmpeg (e.g. Vercel file deploys)."""
     here = os.path.dirname(os.path.abspath(__file__))
     for cand in (
         os.path.join(here, "bin", "ffmpeg"),
@@ -32,6 +34,13 @@ def _find_ffmpeg() -> str | None:
     ):
         if cand and os.path.isfile(cand) and os.access(cand, os.X_OK):
             return cand
+    try:
+        import imageio_ffmpeg  # pip: imageio-ffmpeg (bundles an ffmpeg binary)
+        exe = imageio_ffmpeg.get_ffmpeg_exe()
+        if exe and os.path.isfile(exe):
+            return exe
+    except Exception:
+        pass
     return None
 
 
@@ -112,7 +121,12 @@ def extract_info(url: str) -> dict:
             with YoutubeDL({**_base_opts(**extra), "skip_download": True}) as ydl:
                 info = ydl.extract_info(url, download=False)
             if info and "entries" in info:
-                info = next((e for e in info["entries"] if e), None)
+                entries = [e for e in (info.get("entries") or []) if e]
+                if not entries:
+                    # Empty playlist (e.g. blocked/removed video) — never
+                    # return None: callers would crash on None.get().
+                    raise DownloadError("No downloadable media found at this link")
+                info = entries[0]
             if not info:
                 raise DownloadError("No downloadable media found at this link")
             return info
@@ -150,6 +164,10 @@ def build_quality_menu(info: dict, max_mb: int = config.MAX_FILESIZE_MB) -> dict
           "note":   optional note about hidden big options
         }
     """
+    if not info:
+        return {"videos": [{"format_id": None, "label": "BEST QUALITY • AUTO", "size_txt": "—", "size": 0, "height": 0}],
+                "audios": [{"kbps": k, "label": f"MP3 • {k} KBPS", "size_txt": "—", "size": 0} for k in AUDIO_BITRATES],
+                "note": ""}
     duration = info.get("duration") or 0
     max_bytes = max_mb * 1024 * 1024
 

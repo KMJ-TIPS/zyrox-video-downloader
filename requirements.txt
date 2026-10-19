@@ -2,3 +2,4 @@ python-telegram-bot>=21.6
 yt-dlp
 fastapi
 bgutil-ytdlp-pot-provider==2.0.2
+imageio-ffmpeg

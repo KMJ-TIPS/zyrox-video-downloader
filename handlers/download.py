@@ -20,7 +20,7 @@ import keyboards
 import texts
 import utils
 from yt_dlp.utils import DownloadCancelled, DownloadError
-from handlers import common
+from handlers import admin, common
 
 log = logging.getLogger("zyrox")
 
@@ -66,6 +66,10 @@ async def handle_link(update: Update, context: ContextTypes.DEFAULT_TYPE, url: s
     except Exception as e:
         log.exception("extract_info failed")
         await common.safe_edit(status, texts.FETCH_FAILED.format(reason=utils.clean_error_message(str(e))))
+        return
+
+    if not info:
+        await common.safe_edit(status, texts.FETCH_FAILED.format(reason="⚠️ No video info returned for this link."))
         return
 
     q = downloader.build_quality_menu(info)
