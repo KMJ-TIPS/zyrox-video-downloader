@@ -57,7 +57,7 @@ async def handle_link(update: Update, context: ContextTypes.DEFAULT_TYPE, url: s
         return
     except DownloadError as e:
         if downloader.is_botcheck_error(str(e)):
-            asyncio.create_task(admin.notify_botcheck(context, url))
+            await admin.notify_botcheck(context, url)
         await common.safe_edit(status, texts.FETCH_FAILED.format(reason=utils.clean_error_message(str(e))))
         return
     except asyncio.TimeoutError:
@@ -255,7 +255,7 @@ async def on_quality(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except DownloadError as e:
         log.warning("download failed: %s", e)
         if downloader.is_botcheck_error(str(e)):
-            asyncio.create_task(admin.notify_botcheck(context, url))
+            await admin.notify_botcheck(context, url)
         await common.safe_edit(
             status,
             texts.FETCH_FAILED.format(reason=utils.clean_error_message(str(e))),
