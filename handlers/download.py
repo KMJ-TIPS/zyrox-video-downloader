@@ -135,6 +135,10 @@ async def handle_link(update: Update, context: ContextTypes.DEFAULT_TYPE, url: s
         await common.safe_edit(status, texts.FETCH_FAILED.format(reason=utils.clean_error_message(str(e))))
         return
     except asyncio.TimeoutError:
+        # Slow extract (proxy rotation used to eat the whole budget) —
+        # still try the cobalt mirror before giving up.
+        if downloader._is_youtube(url) and await _cobalt_fallback(update, context, url, status):
+            return
         await common.safe_edit(status, texts.FETCH_FAILED.format(reason="⏱ <b>Timed out</b> while reading the link."))
         return
     except Exception as e:

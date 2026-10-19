@@ -31,7 +31,7 @@ DEFAULT_INSTANCES = [
     "https://co.wuk.sh",
 ]
 
-TIMEOUT = 60
+TIMEOUT = 25  # per instance; 3 instances = 75s worst case, fits the handler budget
 
 
 def _instances() -> list[str]:

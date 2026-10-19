@@ -182,15 +182,18 @@ def _is_youtube(url: str) -> bool:
 
 
 def _proxy_candidates(url: str = "") -> list:
-    """Ordered proxy attempts: static env proxy, last-good, fresh ones,
-    then direct (None) as the final fallback.
+    """Ordered proxy attempts.
 
-    Rotation applies to YouTube only — it is the platform that blocks
-    datacenter IPs. Other platforms use the static proxy (if set) or
-    direct, so working platforms don't slow down."""
-    if url and not _is_youtube(url):
-        return [config.YTDLP_PROXY or None]
-    return _proxy_candidates_youtube()
+    Default: static env proxy (if set) then direct. Free-proxy rotation
+    is OFF by default — live tests proved every free proxy also gets
+    YouTube bot-checked, and rotating through them burns the whole
+    150s handler budget before the cobalt fallback ever runs (the
+    "Timed out" failure). Set YTDLP_PROXY_ROTATION=1 to re-enable it.
+    """
+    if os.getenv("YTDLP_PROXY_ROTATION", "") == "1":
+        if not url or _is_youtube(url):
+            return _proxy_candidates_youtube()
+    return [config.YTDLP_PROXY or None]
 
 
 def _proxy_candidates_youtube() -> list:
