@@ -5,8 +5,11 @@ Runs blocking calls inside a ThreadPoolExecutor from the handlers.
 """
 
 import base64
+import json
 import os
+import random
 import time
+import urllib.request
 
 from yt_dlp import YoutubeDL
 from yt_dlp.utils import DownloadCancelled, DownloadError
@@ -95,15 +98,80 @@ def _extractor_args(clients: list[str] | None = None, use_pot: bool | None = Non
     return args
 
 
-def _base_opts(clients: list[str] | None = None, use_pot: bool | None = None) -> dict:
+_UNSET = object()
+
+# --- Free-proxy rotation -------------------------------------------------
+# Public proxies die within hours, so the bot never depends on one: it
+# fetches a fresh checked list (Geonode API, monosans raw as fallback),
+# tries them in order, and remembers the last one that worked.
+_PROXY_CACHE = {"list": [], "ts": 0.0}
+_LAST_GOOD_PROXY: str | None = None
+
+
+def _fetch_proxy_list() -> list[str]:
+    """Fresh public HTTP proxies, cached 10 minutes. Empty list on failure."""
+    now = time.time()
+    if _PROXY_CACHE["list"] and now - _PROXY_CACHE["ts"] < 600:
+        return list(_PROXY_CACHE["list"])
+    lst: list[str] = []
+    try:
+        req = urllib.request.Request(
+            "https://proxylist.geonode.com/api/proxy-list?limit=100&page=1"
+            "&sort_by=lastChecked&sort_type=desc&filterUpTime=70&filterProtocol=http",
+            headers={"User-Agent": "zyrox/1.0"},
+        )
+        with urllib.request.urlopen(req, timeout=10) as r:
+            data = json.load(r)
+        for p in data.get("data", []):
+            if p.get("ip") and p.get("port"):
+                lst.append(f"http://{p['ip']}:{p['port']}")
+    except Exception:
+        pass
+    if not lst:
+        try:
+            req = urllib.request.Request(
+                "https://raw.githubusercontent.com/monosans/proxy-list/main/proxies/http.txt",
+                headers={"User-Agent": "zyrox/1.0"},
+            )
+            with urllib.request.urlopen(req, timeout=10) as r:
+                for line in r.read().decode(errors="ignore").splitlines():
+                    line = line.strip()
+                    if line and ":" in line:
+                        lst.append("http://" + line)
+        except Exception:
+            pass
+    random.shuffle(lst)
+    _PROXY_CACHE.update({"list": lst[:60], "ts": now})
+    return list(_PROXY_CACHE["list"])
+
+
+def _proxy_candidates() -> list:
+    """Ordered proxy attempts: static env proxy, last-good, fresh ones,
+    then direct (None) as the final fallback."""
+    cands: list = []
+    if config.YTDLP_PROXY and config.YTDLP_PROXY not in cands:
+        cands.append(config.YTDLP_PROXY)
+    if _LAST_GOOD_PROXY and _LAST_GOOD_PROXY not in cands:
+        cands.append(_LAST_GOOD_PROXY)
+    for p in _fetch_proxy_list():
+        if p not in cands:
+            cands.append(p)
+        if len(cands) >= 2:
+            break
+    cands.append(None)  # direct, last resort
+    return cands
+
+
+def _base_opts(clients: list[str] | None = None, use_pot: bool | None = None,
+               proxy=_UNSET, socket_timeout: int = 30, retries: int = 3) -> dict:
     opts = {
         "quiet": True,
         "no_warnings": True,
         "noprogress": True,
         "noplaylist": True,
         "nocheckcertificate": True,
-        "socket_timeout": 30,
-        "retries": 3,
+        "socket_timeout": socket_timeout,
+        "retries": retries,
         "extractor_args": _extractor_args(clients, use_pot),
     }
     # TLS fingerprint impersonation (needs pip: curl_cffi). Python's
@@ -117,8 +185,9 @@ def _base_opts(clients: list[str] | None = None, use_pot: bool | None = None) ->
         opts["impersonate"] = ImpersonateTarget.from_str("chrome")
     except Exception:
         pass
-    if config.YTDLP_PROXY:
-        opts["proxy"] = config.YTDLP_PROXY
+    eff_proxy = config.YTDLP_PROXY if proxy is _UNSET else proxy
+    if eff_proxy:
+        opts["proxy"] = eff_proxy
     if FFMPEG_PATH:
         opts["ffmpeg_location"] = FFMPEG_PATH
     cookie_path = cookie_store.active_path()
@@ -144,49 +213,60 @@ _RETRY_EXOTIC = ["ios", "tv_simply", "android_vr", "android", "web"]
 def extract_info(url: str) -> dict:
     """Blocking: fetch metadata (title, thumbnail, formats...).
 
-    On YouTube bot-check walls it retries automatically:
+    On YouTube bot-check walls it retries automatically, rotating
+    through free proxies (static env proxy → last-good → fresh list →
+    direct) since the host IP itself is usually the blocked one:
       1. normal attempt (PO tokens per config, cookies if installed)
       2. no PO tokens + alternate clients
-      3. exotic clients without PO tokens
+      3. exotic clients without PO tokens (direct attempt only)
     """
-    strategies = [
-        {},
-        {"clients": _RETRY_NO_POT, "use_pot": False},
-        {"clients": _RETRY_EXOTIC, "use_pot": False},
-    ]
+    global _LAST_GOOD_PROXY
     last_err: str | None = None
-    for extra in strategies:
-        try:
-            with YoutubeDL({**_base_opts(**extra), "skip_download": True}) as ydl:
-                info = ydl.extract_info(url, download=False)
-            if info and "entries" in info:
-                entries = [e for e in (info.get("entries") or []) if e]
-                if not entries:
-                    # Empty playlist (e.g. blocked/removed video) — never
-                    # return None: callers would crash on None.get().
+    for proxy in _proxy_candidates():
+        is_proxy = proxy is not None
+        strategies = [
+            {"proxy": proxy, "socket_timeout": 15 if is_proxy else 30,
+             "retries": 1 if is_proxy else 3},
+            {"clients": _RETRY_NO_POT, "use_pot": False, "proxy": proxy,
+             "socket_timeout": 15 if is_proxy else 30, "retries": 1 if is_proxy else 3},
+        ]
+        if not is_proxy:
+            strategies.append({"clients": _RETRY_EXOTIC, "use_pot": False, "proxy": None})
+        for extra in strategies:
+            try:
+                with YoutubeDL({**_base_opts(**extra), "skip_download": True}) as ydl:
+                    info = ydl.extract_info(url, download=False)
+                if info and "entries" in info:
+                    entries = [e for e in (info.get("entries") or []) if e]
+                    if not entries:
+                        # Empty playlist (e.g. blocked/removed video) — never
+                        # return None: callers would crash on None.get().
+                        raise DownloadError("No downloadable media found at this link")
+                    info = entries[0]
+                if not info:
                     raise DownloadError("No downloadable media found at this link")
-                info = entries[0]
-            if not info:
-                raise DownloadError("No downloadable media found at this link")
-            return info
-        except (DownloadCancelled, KeyboardInterrupt):
-            raise
-        except DownloadError as e:
-            last_err = str(e)
-            if not is_botcheck_error(last_err):
+                if proxy:
+                    _LAST_GOOD_PROXY = proxy
+                return info
+            except (DownloadCancelled, KeyboardInterrupt):
                 raise
-            log_retry(url, extra)
-            # Brief pause: hammering the same IP with instant retries
-            # trips the rate limiter harder. A short gap lets a
-            # transient 429 clear before the next client tries.
-            time.sleep(2)
-            continue
+            except DownloadError as e:
+                last_err = str(e)
+                if not is_botcheck_error(last_err):
+                    raise
+                log_retry(url, extra, proxy)
+                # Brief pause: hammering the same IP with instant retries
+                # trips the rate limiter harder. A short gap lets a
+                # transient 429 clear before the next client tries.
+                time.sleep(2)
+                continue
     raise DownloadError(last_err or "Extraction failed")
 
 
-def log_retry(url: str, extra: dict) -> None:
+def log_retry(url: str, extra: dict, proxy=None) -> None:
     tag = ",".join(extra.get("clients") or config.YOUTUBE_CLIENTS)
-    print(f"[zyrox] bot-check on {url} → retrying with clients=[{tag}] pot={extra.get('use_pot')}")
+    via = f" via proxy {proxy}" if proxy else " direct"
+    print(f"[zyrox] bot-check on {url} → retrying with clients=[{tag}] pot={extra.get('use_pot')}{via}")
 
 
 def _estimate_size(fmt: dict, duration: float):
@@ -287,27 +367,8 @@ def download(
     mode: "video" | "audio"
     Raises DownloadCancelled when cancel_check() returns True.
     """
+    global _LAST_GOOD_PROXY
     os.makedirs(config.DOWNLOAD_DIR, exist_ok=True)
-
-    if mode == "audio":
-        opts = {
-            **_base_opts(),
-            "format": "bestaudio/best",
-            "writethumbnail": True,
-            "outtmpl": os.path.join(config.DOWNLOAD_DIR, "%(extractor_key)s_%(id)s.%(ext)s"),
-            "postprocessors": [
-                {"key": "FFmpegExtractAudio", "preferredcodec": "mp3", "preferredquality": str(audio_kbps)},
-                {"key": "FFmpegMetadata"},
-                {"key": "EmbedThumbnail"},
-            ],
-        }
-    else:
-        opts = {
-            **_base_opts(),
-            "format": f"{format_id}+bestaudio/best" if format_id else "bestvideo*+bestaudio/best",
-            "merge_output_format": "mp4",
-            "outtmpl": os.path.join(config.DOWNLOAD_DIR, "%(extractor_key)s_%(id)s.%(ext)s"),
-        }
 
     hooks = []
     if progress_hook:
@@ -319,35 +380,68 @@ def download(
         for h in hooks:
             h(d)
 
-    opts["progress_hooks"] = [_hook]
-
-    attempts = [
-        {},
-        {"clients": _RETRY_NO_POT, "use_pot": False},
-        {"clients": _RETRY_EXOTIC, "use_pot": False},
-    ]
     last_err: Exception | None = None
-    for idx, extra in enumerate(attempts):
-        is_last = idx == len(attempts) - 1
-        try:
-            with YoutubeDL({**opts, **_base_opts(**extra)}) as ydl:
-                info = ydl.extract_info(url, download=True)
-            if info and "entries" in info:
-                entries = [e for e in (info.get("entries") or []) if e]
-                info = entries[0] if entries else None
-            rd = (info or {}).get("requested_downloads") or []
-            if rd and rd[0].get("filepath"):
-                return rd[0]["filepath"], info
-            break
-        except (DownloadCancelled, KeyboardInterrupt):
-            raise
-        except DownloadError as e:
-            last_err = e
-            if not is_botcheck_error(str(e)) or is_last:
+    info: dict | None = None
+    for proxy in _proxy_candidates():
+        is_proxy = proxy is not None
+        if mode == "audio":
+            opts = {
+                **_base_opts(proxy=proxy,
+                             socket_timeout=15 if is_proxy else 30,
+                             retries=1 if is_proxy else 3),
+                "format": "bestaudio/best",
+                "writethumbnail": True,
+                "outtmpl": os.path.join(config.DOWNLOAD_DIR, "%(extractor_key)s_%(id)s.%(ext)s"),
+                "postprocessors": [
+                    {"key": "FFmpegExtractAudio", "preferredcodec": "mp3", "preferredquality": str(audio_kbps)},
+                    {"key": "FFmpegMetadata"},
+                    {"key": "EmbedThumbnail"},
+                ],
+            }
+        else:
+            opts = {
+                **_base_opts(proxy=proxy,
+                             socket_timeout=15 if is_proxy else 30,
+                             retries=1 if is_proxy else 3),
+                "format": f"{format_id}+bestaudio/best" if format_id else "bestvideo*+bestaudio/best",
+                "merge_output_format": "mp4",
+                "outtmpl": os.path.join(config.DOWNLOAD_DIR, "%(extractor_key)s_%(id)s.%(ext)s"),
+            }
+        opts["progress_hooks"] = [_hook]
+
+        attempts = [
+            {"proxy": proxy},
+            {"clients": _RETRY_NO_POT, "use_pot": False, "proxy": proxy},
+        ]
+        if not is_proxy:
+            attempts.append({"clients": _RETRY_EXOTIC, "use_pot": False, "proxy": None})
+        for idx, extra in enumerate(attempts):
+            is_last = idx == len(attempts) - 1
+            try:
+                with YoutubeDL({**opts, **_base_opts(**extra)}) as ydl:
+                    info = ydl.extract_info(url, download=True)
+                if info and "entries" in info:
+                    entries = [e for e in (info.get("entries") or []) if e]
+                    info = entries[0] if entries else None
+                rd = (info or {}).get("requested_downloads") or []
+                if rd and rd[0].get("filepath"):
+                    if proxy:
+                        _LAST_GOOD_PROXY = proxy
+                    return rd[0]["filepath"], info
+                break
+            except (DownloadCancelled, KeyboardInterrupt):
                 raise
-            log_retry(url, extra)
-            time.sleep(2)
-            continue
+            except DownloadError as e:
+                last_err = e
+                if not is_botcheck_error(str(e)):
+                    raise
+                if is_last:
+                    if proxy is None:
+                        raise  # direct was the last candidate: nothing left
+                    break  # try the next proxy
+                log_retry(url, extra, proxy)
+                time.sleep(2)
+                continue
 
     # fallback: newest file in download dir
     files = [os.path.join(config.DOWNLOAD_DIR, f) for f in os.listdir(config.DOWNLOAD_DIR)]
