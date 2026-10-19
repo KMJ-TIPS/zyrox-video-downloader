@@ -84,9 +84,12 @@ def _base_opts(clients: list[str] | None = None, use_pot: bool | None = None) ->
     # TLS fingerprint impersonation (needs pip: curl_cffi). Python's
     # default TLS fingerprint is a strong bot signal; impersonating a
     # real browser removes it. Skipped silently if curl_cffi is absent.
+    # NOTE: yt-dlp's Python API needs an ImpersonateTarget object — a
+    # plain string ("chrome") raises AssertionError in YoutubeDL.__init__.
     try:
         import curl_cffi  # noqa: F401
-        opts["impersonate"] = "chrome"
+        from yt_dlp.networking.impersonate import ImpersonateTarget
+        opts["impersonate"] = ImpersonateTarget.from_str("chrome")
     except Exception:
         pass
     if config.YTDLP_PROXY:

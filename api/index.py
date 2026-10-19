@@ -128,7 +128,6 @@ async def health(request: Request):
             "cookies": cookie_store.source(),
             "pot_plugin_installed": _spec("yt_dlp_plugins.extractor.getpot_bgutil"),
             "curl_cffi_installed": _spec("curl_cffi"),
-            "quickjs_installed": _spec("quickjs"),
         }
     return {
         "ok": True,

@@ -4,4 +4,3 @@ fastapi
 bgutil-ytdlp-pot-provider==2.0.2
 imageio-ffmpeg
 curl_cffi
-quickjs
