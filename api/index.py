@@ -126,7 +126,7 @@ async def health(request: Request):
             "clients": config.YOUTUBE_CLIENTS,
             "fetch_pot": config.FETCH_POT,
             "cookies": cookie_store.source(),
-            "pot_plugin_installed": _spec("bgutil_ytdlp_pot_provider"),
+            "pot_plugin_installed": _spec("yt_dlp_plugins.extractor.getpot_bgutil"),
             "curl_cffi_installed": _spec("curl_cffi"),
             "quickjs_installed": _spec("quickjs"),
         }
